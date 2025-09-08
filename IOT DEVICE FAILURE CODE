@@ -1,0 +1,647 @@
+# =====================================================
+# Optimized IoT Predictive Maintenance System
+# Complete Implementation with All ML Algorithms
+# =====================================================
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from sklearn.metrics import (
+    classification_report, accuracy_score, confusion_matrix,
+    precision_score, recall_score, f1_score, roc_curve, auc
+)
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.callbacks import EarlyStopping
+import warnings
+warnings.filterwarnings("ignore")
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# =====================================================
+# 1. Load and Prepare Dataset
+# =====================================================
+print("="*60)
+print("IoT PREDICTIVE MAINTENANCE SYSTEM")
+print("="*60)
+print("\n📂 Loading Intel Berkeley Research Lab sensor data...")
+
+try:
+    # Try loading the actual sensor data file
+    # Update the filename to match your actual file
+    data = pd.read_csv("sensor_data.txt", sep=" ", header=None)
+except:
+    print("⚠️ Sensor data file not found. Generating synthetic data for testing...")
+    # Generate synthetic data if file not found
+    n_samples = 100000  # Use smaller dataset for testing
+    dates = pd.date_range(start='2004-02-28', periods=n_samples, freq='30s')
+    data = pd.DataFrame({
+        'date': dates,
+        'sensor_id': np.random.randint(1, 50, n_samples),
+        'sensor_type': np.ones(n_samples),
+        'epoch': np.arange(n_samples),
+        'temperature': np.random.normal(20, 5, n_samples),
+        'humidity': np.random.normal(40, 10, n_samples),
+        'light': np.random.normal(50, 15, n_samples),
+        'voltage': np.random.normal(2.5, 0.3, n_samples)
+    })
+    data = data[['date', 'sensor_id', 'sensor_type', 'epoch', 
+                 'temperature', 'humidity', 'light', 'voltage']]
+
+# Assign column names based on Intel dataset format
+if len(data.columns) == 8:
+    data.columns = ["date", "sensor_id", "sensor_type", "epoch",
+                    "temperature", "humidity", "light", "voltage"]
+
+print(f"✅ Data loaded: {len(data)} records")
+print(f"📊 Sensors: {data['sensor_id'].nunique()} unique sensors")
+
+# =====================================================
+# 2. Optimized Data Cleaning
+# =====================================================
+print("\n🧹 Cleaning data...")
+
+# Convert date to datetime
+data["date"] = pd.to_datetime(data["date"], errors="coerce")
+
+# Remove invalid readings (physical constraints)
+initial_size = len(data)
+data = data[(data["temperature"] >= -10) & (data["temperature"] <= 60)]
+data = data[(data["humidity"] >= 0) & (data["humidity"] <= 100)]
+data = data[(data["voltage"] >= 1.5) & (data["voltage"] <= 3.5)]
+data = data.dropna()
+
+print(f"✅ Removed {initial_size - len(data)} invalid records")
+
+# IMPORTANT: Sample data if too large (for faster processing)
+MAX_SAMPLES = 50000  # Adjust based on your system's capacity
+if len(data) > MAX_SAMPLES:
+    print(f"📊 Sampling {MAX_SAMPLES} records from {len(data)} for faster processing...")
+    data = data.sample(n=MAX_SAMPLES, random_state=42)
+
+# Sort and reset index
+data = data.sort_values(["sensor_id", "date"]).reset_index(drop=True)
+print(f"✅ After cleaning and sampling: {len(data)} records")
+
+# =====================================================
+# 3. Optimized Fault Injection
+# =====================================================
+print("\n⚠️ Injecting synthetic faults...")
+
+def inject_faults_optimized(df, fault_rate=0.1):
+    """
+    Optimized fault injection using vectorized operations
+    """
+    df = df.copy()
+    n = len(df)
+    
+    # Initialize columns
+    df["will_fail_in_48h"] = 0
+    df["fault_type"] = "normal"
+    
+    # Calculate number of fault regions
+    n_fault_regions = max(1, int(n * fault_rate / 100))  # Each fault affects ~100 records
+    
+    print(f"  Injecting {n_fault_regions} fault regions...")
+    
+    for i in range(n_fault_regions):
+        # Random fault parameters
+        fault_type = np.random.choice(["drift", "stuck", "voltage", "noise"])
+        
+        # Ensure we have enough data points
+        if n > 200:
+            start_idx = np.random.randint(50, n - 150)
+            duration = np.random.randint(30, min(100, n - start_idx - 50))
+            
+            if fault_type == "drift":
+                # Temperature drift
+                drift = np.linspace(0, np.random.uniform(5, 10), duration)
+                df.iloc[start_idx:start_idx+duration, df.columns.get_loc("temperature")] += drift
+                
+            elif fault_type == "stuck":
+                # Stuck sensor
+                stuck_val = df.iloc[start_idx, df.columns.get_loc("humidity")]
+                df.iloc[start_idx:start_idx+duration, df.columns.get_loc("humidity")] = stuck_val
+                
+            elif fault_type == "voltage":
+                # Voltage drop
+                df.iloc[start_idx:start_idx+duration, df.columns.get_loc("voltage")] *= 0.8
+                
+            else:  # noise
+                # Increased noise
+                noise = np.random.normal(0, 2, duration)
+                df.iloc[start_idx:start_idx+duration, df.columns.get_loc("temperature")] += noise
+            
+            # Mark failure labels (48 hours before and during fault)
+            failure_start = max(0, start_idx - 48)
+            failure_end = min(n, start_idx + duration)
+            df.iloc[failure_start:failure_end, df.columns.get_loc("will_fail_in_48h")] = 1
+            df.iloc[start_idx:start_idx+duration, df.columns.get_loc("fault_type")] = fault_type
+    
+    return df
+
+# Apply fault injection
+data_with_faults = inject_faults_optimized(data, fault_rate=0.15)
+
+print("✅ Fault injection complete!")
+print(f"  Normal samples: {(data_with_faults['will_fail_in_48h'] == 0).sum()}")
+print(f"  Failure samples: {(data_with_faults['will_fail_in_48h'] == 1).sum()}")
+
+# =====================================================
+# 4. Efficient Feature Engineering
+# =====================================================
+print("\n🔧 Engineering features...")
+
+def create_features_optimized(df):
+    """
+    Optimized feature engineering with vectorized operations
+    """
+    df = df.copy()
+    
+    # Basic features
+    print("  Creating rolling statistics...")
+    for window in [12, 24]:  # Reduced windows for speed
+        df[f"temp_mean_{window}"] = df.groupby("sensor_id")["temperature"].transform(
+            lambda x: x.rolling(window, min_periods=1).mean())
+        df[f"temp_std_{window}"] = df.groupby("sensor_id")["temperature"].transform(
+            lambda x: x.rolling(window, min_periods=1).std())
+        df[f"humidity_mean_{window}"] = df.groupby("sensor_id")["humidity"].transform(
+            lambda x: x.rolling(window, min_periods=1).mean())
+        df[f"voltage_mean_{window}"] = df.groupby("sensor_id")["voltage"].transform(
+            lambda x: x.rolling(window, min_periods=1).mean())
+    
+    print("  Creating change rate features...")
+    # Rate of change
+    df["temp_change"] = df.groupby("sensor_id")["temperature"].diff()
+    df["humidity_change"] = df.groupby("sensor_id")["humidity"].diff()
+    df["voltage_change"] = df.groupby("sensor_id")["voltage"].diff()
+    
+    print("  Creating statistical features...")
+    # Z-scores for anomaly detection
+    df["temp_zscore"] = df.groupby("sensor_id")["temperature"].transform(
+        lambda x: (x - x.mean()) / (x.std() + 1e-6))
+    df["humidity_zscore"] = df.groupby("sensor_id")["humidity"].transform(
+        lambda x: (x - x.mean()) / (x.std() + 1e-6))
+    
+    # Stability metrics
+    df["temp_stability"] = df.groupby("sensor_id")["temperature"].transform(
+        lambda x: x.rolling(20, min_periods=1).std())
+    
+    # Fill NaN values
+    df = df.fillna(0)
+    
+    return df
+
+# Apply feature engineering
+print("  Processing features (this may take a moment)...")
+data_features = create_features_optimized(data_with_faults)
+print("✅ Feature engineering complete!")
+
+# Select feature columns
+feature_cols = [col for col in data_features.columns 
+                if col not in ["date", "sensor_id", "sensor_type", "epoch", 
+                              "will_fail_in_48h", "fault_type", "light"]]
+
+X = data_features[feature_cols].values
+y = data_features["will_fail_in_48h"].values
+
+print(f"📊 Feature matrix shape: {X.shape}")
+print(f"📊 Target distribution: {np.bincount(y.astype(int))}")
+
+# =====================================================
+# 5. Train-Test Split
+# =====================================================
+print("\n📂 Splitting data...")
+
+# Temporal split (80-20)
+split_idx = int(len(X) * 0.8)
+X_train, X_test = X[:split_idx], X[split_idx:]
+y_train, y_test = y[:split_idx], y[split_idx:]
+
+# Scale features
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+print(f"✅ Training set: {len(X_train)} samples")
+print(f"✅ Test set: {len(X_test)} samples")
+
+# =====================================================
+# 6. MODEL 1: LOGISTIC REGRESSION
+# =====================================================
+print("\n" + "="*60)
+print("MODEL 1: LOGISTIC REGRESSION")
+print("="*60)
+
+log_reg = LogisticRegression(
+    penalty='l2',
+    C=1.0,
+    max_iter=1000,
+    random_state=42,
+    solver='saga'  # Faster for large datasets
+)
+
+print("Training Logistic Regression...")
+log_reg.fit(X_train_scaled, y_train)
+y_pred_lr = log_reg.predict(X_test_scaled)
+y_prob_lr = log_reg.predict_proba(X_test_scaled)[:, 1]
+
+# Calculate metrics
+acc_lr = accuracy_score(y_test, y_pred_lr)
+prec_lr = precision_score(y_test, y_pred_lr, zero_division=0)
+rec_lr = recall_score(y_test, y_pred_lr, zero_division=0)
+f1_lr = f1_score(y_test, y_pred_lr, zero_division=0)
+
+print(f"✅ Accuracy: {acc_lr:.4f}")
+print(f"✅ Precision: {prec_lr:.4f}")
+print(f"✅ Recall: {rec_lr:.4f}")
+print(f"✅ F1-Score: {f1_lr:.4f}")
+
+# =====================================================
+# 7. MODEL 2: SUPPORT VECTOR MACHINE
+# =====================================================
+print("\n" + "="*60)
+print("MODEL 2: SUPPORT VECTOR MACHINE")
+print("="*60)
+
+# Use smaller subset for SVM (it's slow on large datasets)
+svm_subset = min(5000, len(X_train))
+X_train_svm = X_train_scaled[:svm_subset]
+y_train_svm = y_train[:svm_subset]
+
+svm_model = SVC(
+    kernel='rbf',
+    C=1.0,
+    probability=True,
+    random_state=42,
+    cache_size=1000  # Increase cache for speed
+)
+
+print(f"Training SVM on {svm_subset} samples...")
+svm_model.fit(X_train_svm, y_train_svm)
+y_pred_svm = svm_model.predict(X_test_scaled)
+y_prob_svm = svm_model.predict_proba(X_test_scaled)[:, 1]
+
+# Calculate metrics
+acc_svm = accuracy_score(y_test, y_pred_svm)
+prec_svm = precision_score(y_test, y_pred_svm, zero_division=0)
+rec_svm = recall_score(y_test, y_pred_svm, zero_division=0)
+f1_svm = f1_score(y_test, y_pred_svm, zero_division=0)
+
+print(f"✅ Accuracy: {acc_svm:.4f}")
+print(f"✅ Precision: {prec_svm:.4f}")
+print(f"✅ Recall: {rec_svm:.4f}")
+print(f"✅ F1-Score: {f1_svm:.4f}")
+
+# =====================================================
+# 8. MODEL 3: RANDOM FOREST
+# =====================================================
+print("\n" + "="*60)
+print("MODEL 3: RANDOM FOREST")
+print("="*60)
+
+rf_model = RandomForestClassifier(
+    n_estimators=100,
+    max_depth=10,
+    min_samples_split=5,
+    min_samples_leaf=2,
+    random_state=42,
+    n_jobs=-1  # Use all CPU cores
+)
+
+print("Training Random Forest...")
+rf_model.fit(X_train_scaled, y_train)
+y_pred_rf = rf_model.predict(X_test_scaled)
+y_prob_rf = rf_model.predict_proba(X_test_scaled)[:, 1]
+
+# Calculate metrics
+acc_rf = accuracy_score(y_test, y_pred_rf)
+prec_rf = precision_score(y_test, y_pred_rf, zero_division=0)
+rec_rf = recall_score(y_test, y_pred_rf, zero_division=0)
+f1_rf = f1_score(y_test, y_pred_rf, zero_division=0)
+
+print(f"✅ Accuracy: {acc_rf:.4f}")
+print(f"✅ Precision: {prec_rf:.4f}")
+print(f"✅ Recall: {rec_rf:.4f}")
+print(f"✅ F1-Score: {f1_rf:.4f}")
+
+# Feature importance
+feature_importance = pd.DataFrame({
+    'feature': feature_cols,
+    'importance': rf_model.feature_importances_
+}).sort_values('importance', ascending=False).head(10)
+
+print("\n🔍 Top 10 Important Features:")
+for idx, row in feature_importance.iterrows():
+    print(f"  {row['feature']}: {row['importance']:.4f}")
+
+# =====================================================
+# 9. DIMENSIONALITY REDUCTION - PCA
+# =====================================================
+print("\n" + "="*60)
+print("DIMENSIONALITY REDUCTION USING PCA")
+print("="*60)
+
+# Apply PCA
+n_components = min(10, X_train_scaled.shape[1])
+pca = PCA(n_components=n_components)
+X_train_pca = pca.fit_transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
+
+explained_var = pca.explained_variance_ratio_.sum()
+print(f"✅ Reduced from {X_train_scaled.shape[1]} to {n_components} dimensions")
+print(f"✅ Explained variance: {explained_var:.4f}")
+
+# Train Random Forest on PCA features
+rf_pca = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)
+rf_pca.fit(X_train_pca, y_train)
+y_pred_pca = rf_pca.predict(X_test_pca)
+
+acc_pca = accuracy_score(y_test, y_pred_pca)
+print(f"✅ Random Forest + PCA Accuracy: {acc_pca:.4f}")
+
+# =====================================================
+# 10. UNSUPERVISED LEARNING - K-MEANS
+# =====================================================
+print("\n" + "="*60)
+print("UNSUPERVISED ANOMALY DETECTION USING K-MEANS")
+print("="*60)
+
+# Use K-means for anomaly detection
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+
+# Use subset for faster clustering
+kmeans_subset = min(10000, len(X_train_scaled))
+X_kmeans = X_train_scaled[:kmeans_subset]
+y_kmeans = y_train[:kmeans_subset]
+
+print(f"Clustering {kmeans_subset} samples...")
+clusters = kmeans.fit_predict(X_kmeans)
+
+# Analyze cluster distribution
+cluster_failure_rate = []
+for i in range(3):
+    cluster_mask = clusters == i
+    if cluster_mask.sum() > 0:
+        failure_rate = y_kmeans[cluster_mask].mean()
+        cluster_failure_rate.append(failure_rate)
+        print(f"  Cluster {i}: {cluster_mask.sum()} samples, "
+              f"Failure rate: {failure_rate:.2%}")
+
+# =====================================================
+# 11. NEURAL NETWORK - LSTM
+# =====================================================
+print("\n" + "="*60)
+print("DEEP LEARNING - LSTM NETWORK")
+print("="*60)
+
+# Prepare sequence data for LSTM
+seq_features = ["temperature", "humidity", "voltage"]
+seq_length = 24
+
+print("Preparing sequence data...")
+X_seq = data_features[seq_features].values
+y_seq = data_features["will_fail_in_48h"].values
+
+# Create sequences
+X_lstm = []
+y_lstm = []
+
+for i in range(seq_length, min(len(X_seq), 10000)):  # Limit for speed
+    X_lstm.append(X_seq[i-seq_length:i])
+    y_lstm.append(y_seq[i])
+
+X_lstm = np.array(X_lstm)
+y_lstm = np.array(y_lstm)
+
+if len(X_lstm) > 0:
+    # Split LSTM data
+    split_idx_lstm = int(len(X_lstm) * 0.8)
+    X_train_lstm = X_lstm[:split_idx_lstm]
+    X_test_lstm = X_lstm[split_idx_lstm:]
+    y_train_lstm = y_lstm[:split_idx_lstm]
+    y_test_lstm = y_lstm[split_idx_lstm:]
+    
+    print(f"LSTM Training samples: {len(X_train_lstm)}")
+    print(f"LSTM Test samples: {len(X_test_lstm)}")
+    
+    # Build LSTM model
+    lstm_model = Sequential([
+        LSTM(32, return_sequences=True, 
+             input_shape=(seq_length, len(seq_features))),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
+        Dense(8, activation='relu'),
+        Dense(1, activation='sigmoid')
+    ])
+    
+    lstm_model.compile(
+        optimizer='adam',
+        loss='binary_crossentropy',
+        metrics=['accuracy']
+    )
+    
+    # Train with early stopping
+    early_stop = EarlyStopping(monitor='val_loss', patience=3, verbose=1)
+    
+    print("Training LSTM...")
+    history = lstm_model.fit(
+        X_train_lstm, y_train_lstm,
+        epochs=5,  # Reduced epochs for speed
+        batch_size=32,
+        validation_split=0.2,
+        callbacks=[early_stop],
+        verbose=1
+    )
+    
+    # Evaluate
+    lstm_loss, lstm_acc = lstm_model.evaluate(X_test_lstm, y_test_lstm, verbose=0)
+    print(f"✅ LSTM Test Accuracy: {lstm_acc:.4f}")
+else:
+    print("⚠️ Not enough data for LSTM sequences")
+    lstm_acc = 0
+
+# =====================================================
+# 12. MODEL COMPARISON & VISUALIZATION
+# =====================================================
+print("\n" + "="*60)
+print("PERFORMANCE COMPARISON")
+print("="*60)
+
+# Create comparison table
+results_df = pd.DataFrame({
+    'Model': ['Logistic Regression', 'SVM', 'Random Forest', 'RF + PCA', 'LSTM'],
+    'Accuracy': [acc_lr, acc_svm, acc_rf, acc_pca, lstm_acc],
+    'Precision': [prec_lr, prec_svm, prec_rf, 0, 0],
+    'Recall': [rec_lr, rec_svm, rec_rf, 0, 0],
+    'F1-Score': [f1_lr, f1_svm, f1_rf, 0, 0]
+})
+
+print("\n📊 Model Performance Summary:")
+print(results_df.to_string(index=False))
+
+# Find best model
+best_idx = results_df['F1-Score'].idxmax()
+best_model = results_df.iloc[best_idx]
+
+print(f"\n🏆 Best Model: {best_model['Model']}")
+print(f"   Accuracy: {best_model['Accuracy']:.2%}")
+print(f"   F1-Score: {best_model['F1-Score']:.2%}")
+
+# =====================================================
+# 13. VISUALIZATION
+# =====================================================
+print("\n📊 Generating visualizations...")
+
+# Plot 1: Model Comparison
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+# Accuracy comparison
+models = results_df['Model'][:3]
+accuracies = results_df['Accuracy'][:3]
+axes[0, 0].bar(models, accuracies, color=['blue', 'green', 'red'])
+axes[0, 0].set_title('Model Accuracy Comparison')
+axes[0, 0].set_ylabel('Accuracy')
+axes[0, 0].set_ylim([0, 1])
+for i, v in enumerate(accuracies):
+    axes[0, 0].text(i, v + 0.01, f'{v:.3f}', ha='center')
+
+# Precision-Recall comparison
+precisions = results_df['Precision'][:3]
+recalls = results_df['Recall'][:3]
+x = np.arange(len(models))
+width = 0.35
+axes[0, 1].bar(x - width/2, precisions, width, label='Precision', color='skyblue')
+axes[0, 1].bar(x + width/2, recalls, width, label='Recall', color='lightcoral')
+axes[0, 1].set_title('Precision vs Recall')
+axes[0, 1].set_xticks(x)
+axes[0, 1].set_xticklabels(models, rotation=45, ha='right')
+axes[0, 1].legend()
+
+# Feature Importance (Random Forest)
+if len(feature_importance) > 0:
+    axes[1, 0].barh(feature_importance['feature'][:5], 
+                    feature_importance['importance'][:5])
+    axes[1, 0].set_title('Top 5 Important Features')
+    axes[1, 0].set_xlabel('Importance')
+
+# Confusion Matrix for best model
+if best_model['Model'] == 'Random Forest':
+    cm = confusion_matrix(y_test, y_pred_rf)
+elif best_model['Model'] == 'Logistic Regression':
+    cm = confusion_matrix(y_test, y_pred_lr)
+else:
+    cm = confusion_matrix(y_test, y_pred_svm)
+
+im = axes[1, 1].imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+axes[1, 1].figure.colorbar(im, ax=axes[1, 1])
+axes[1, 1].set_title(f'Confusion Matrix - {best_model["Model"]}')
+axes[1, 1].set_xlabel('Predicted')
+axes[1, 1].set_ylabel('Actual')
+
+# Add text annotations
+for i in range(2):
+    for j in range(2):
+        axes[1, 1].text(j, i, str(cm[i, j]), ha="center", va="center")
+
+plt.tight_layout()
+plt.savefig('model_comparison.png', dpi=100, bbox_inches='tight')
+plt.show()
+
+# =====================================================
+# 14. SAVE MODELS
+# =====================================================
+print("\n💾 Saving models...")
+
+import pickle
+
+# Save the best model
+if best_model['Model'] == 'Random Forest':
+    best_model_obj = rf_model
+elif best_model['Model'] == 'Logistic Regression':
+    best_model_obj = log_reg
+else:
+    best_model_obj = svm_model
+
+# Save model and scaler
+with open('best_model.pkl', 'wb') as f:
+    pickle.dump(best_model_obj, f)
+with open('scaler.pkl', 'wb') as f:
+    pickle.dump(scaler, f)
+
+print("✅ Models saved successfully!")
+
+# =====================================================
+# 15. REAL-TIME PREDICTION FUNCTION
+# =====================================================
+print("\n" + "="*60)
+print("REAL-TIME PREDICTION DEMO")
+print("="*60)
+
+def predict_sensor_failure(new_data, model, scaler):
+    """
+    Predict failure for new sensor reading
+    """
+    # Extract features
+    features = create_features_optimized(new_data)
+    X_new = features[feature_cols].iloc[-1:].values
+    
+    # Scale
+    X_new_scaled = scaler.transform(X_new)
+    
+    # Predict
+    prediction = model.predict(X_new_scaled)[0]
+    probability = model.predict_proba(X_new_scaled)[0, 1]
+    
+    return prediction, probability
+
+# Demo prediction
+if len(data_features) > 0:
+    sample_sensor_data = data_features.iloc[-100:].copy()
+    pred, prob = predict_sensor_failure(sample_sensor_data, best_model_obj, scaler)
+    
+    print(f"🔮 Sensor Status Prediction:")
+    print(f"   Prediction: {'⚠️ FAILURE LIKELY' if pred == 1 else '✅ NORMAL'}")
+    print(f"   Failure Probability: {prob:.2%}")
+    print(f"   Recommendation: {'Schedule maintenance immediately!' if prob > 0.7 
+          else 'Monitor closely' if prob > 0.3 
+          else 'Continue normal operation'}")
+
+# =====================================================
+# 16. PROJECT SUMMARY
+# =====================================================
+print("\n" + "="*60)
+print("PROJECT COMPLETE!")
+print("="*60)
+
+print("\n📋 Summary:")
+print(f"✅ Processed {len(data)} sensor records")
+print(f"✅ Created {len(feature_cols)} features")
+print(f"✅ Trained 5 different models")
+print(f"✅ Best model achieved {best_model['Accuracy']:.2%} accuracy")
+
+print("\n🎯 Achievement vs Target:")
+target_accuracy = 0.90
+if best_model['Accuracy'] >= target_accuracy:
+    print(f"✅ TARGET ACHIEVED! ({best_model['Accuracy']:.2%} >= {target_accuracy:.0%})")
+else:
+    gap = target_accuracy - best_model['Accuracy']
+    print(f"📈 Current: {best_model['Accuracy']:.2%} (Gap: {gap:.2%} to target)")
+    print("\n💡 Suggestions to improve:")
+    print("   1. Collect more failure data")
+    print("   2. Engineer more domain-specific features")
+    print("   3. Try ensemble methods")
+    print("   4. Hyperparameter tuning")
+
+print("\n✅ All algorithms from syllabus implemented successfully!")
+print("="*60)
